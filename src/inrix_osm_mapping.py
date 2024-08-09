@@ -9,12 +9,9 @@ import contextily as ctx
 from shapely.geometry import Point, LineString
 from shapely.ops import nearest_points
 import networkx as nx
+import math
 
-# Add the path to the src folder
-sys.path.append('../src')
 
-# Now you can import the custom module
-import network_graphing as net_graph
 
 def load_and_prepare_inrix_data(geojson_path, county_name):
     """Load and filter INRIX GeoDataFrame based on the specified county."""
@@ -33,6 +30,44 @@ def get_osm_graph(bbox, custom_filter):
                            custom_filter=custom_filter, network_type='drive')
     return G
 
+def classify_bearing(bearing):
+    if bearing >= 337.5 or bearing < 22.5:
+        return 'N'
+    elif 22.5 <= bearing < 67.5:
+        return 'NE'
+    elif 67.5 <= bearing < 112.5:
+        return 'E'
+    elif 112.5 <= bearing < 157.5:
+        return 'SE'
+    elif 157.5 <= bearing < 202.5:
+        return 'S'
+    elif 202.5 <= bearing < 247.5:
+        return 'SW'
+    elif 247.5 <= bearing < 292.5:
+        return 'W'
+    elif 292.5 <= bearing < 337.5:
+        return 'NW'
+    
+
+def calculate_bearing(point1, point2):
+    lon1, lat1 = point1
+    lon2, lat2 = point2
+    dLon = math.radians(lon2 - lon1)
+    lat1 = math.radians(lat1)
+    lat2 = math.radians(lat2)
+    x = math.sin(dLon) * math.cos(lat2)
+    y = math.cos(lat1) * math.sin(lat2) - (math.sin(lat1) * math.cos(lat2) * math.cos(dLon))
+    initial_bearing = math.atan2(x, y)
+    initial_bearing = math.degrees(initial_bearing)
+    compass_bearing = (initial_bearing + 360) % 360
+    return compass_bearing
+
+def line_bearing(line):
+    point1 = (line.coords[0][0], line.coords[0][1])
+    point2 = (line.coords[-1][0], line.coords[-1][1])
+    return calculate_bearing(point1, point2)
+    
+
 def prepare_osmnx_inrix_data(csv_path, davidson_inrix_df):
     """Prepare and expand OSMNX INRIX data."""
     osmnx_inrix = pd.read_csv(csv_path)
@@ -49,13 +84,13 @@ def merge_and_filter_inrix_osm(edges, Ave_21_expanded, davidson_inrix_df):
         Ave_21_expanded, left_on='osmid', right_on='OSMWayIDs', how='inner')
     test_inrix = test[['u', 'v', 'osmid', 'lanes', 'name', 'highway', 'oneway', 'reversed', 'length',
                        'geometry', 'XDSegID', 'OSMWayDirections']].merge(davidson_inrix_df,
-                                                                       left_on='XDSegID', right_on='XDSegID', how='inner')
+                                                                       left_on='XDSegID', right_on='XDSegID', how='inner',suffixes=('_osm', '_inrix'))
     return test_inrix
 
 def apply_bearing_classification(df):
     """Apply bearing calculation and classification."""
-    df['osm_line_bearing'] = df['geometry_x'].apply(net_graph.line_bearing)
-    df['compass_direction'] = df['osm_line_bearing'].apply(net_graph.classify_bearing_simple)
+    df['osm_line_bearing'] = df['geometry_osm'].apply(line_bearing)
+    df['compass_direction'] = df['osm_line_bearing'].apply(classify_bearing)
     df['match'] = df.apply(lambda row: row['Bearing'] in row['compass_direction'], axis=1)
     return df
 
@@ -85,6 +120,7 @@ def plot_matched_geometry(df, geometry_column, title):
     plt.show()
 
 def main():
+
     geojson_path = '../data/MapData2023/maprelease-geojson/USA_Tennessee.geojson'
     csv_path = '../data/MapData2023/maprelease-osmconflation/USA_Tennessee.csv'
     county_name = 'DAVIDSON'
@@ -97,9 +133,9 @@ def main():
 
     # Custom filter for OSM data
     custom_filter = ('["highway"!~"cycleway|footway|path|pedestrian|'
-                     'steps|service|track|construction|bridleway|'
-                     'corridor|elevator|escalator|proposed|'
-                     'rest_area|escape|emergency_bay|bus_guideway"]')
+                        'steps|service|track|construction|bridleway|'
+                        'corridor|elevator|escalator|proposed|'
+                        'rest_area|escape|emergency_bay|bus_guideway"]')
 
     # Get OSM graph
     G = get_osm_graph(bbox, custom_filter)
@@ -108,20 +144,20 @@ def main():
     nodes, edges = ox.graph_to_gdfs(G, nodes=True, edges=True)
 
     # Prepare OSMNX INRIX data
-    Ave_21_expanded = prepare_osmnx_inrix_data(csv_path, davidson_inrix_df)
+    davidson_osm = prepare_osmnx_inrix_data(csv_path, davidson_inrix_df)
 
     # Merge and filter INRIX and OSM data
-    test_inrix = merge_and_filter_inrix_osm(edges, Ave_21_expanded, davidson_inrix_df)
+    merged_osm_inrix = merge_and_filter_inrix_osm(edges, davidson_osm, davidson_inrix_df)
 
     # Apply bearing classification
-    test_inrix = apply_bearing_classification(test_inrix)
+    merged_osm_inrix  = apply_bearing_classification(merged_osm_inrix)
 
     # Filter groups by match
-    filtered_inrix, unfiltered_inrix = filter_groups_by_match(test_inrix)
+    filtered_osm_inrix, unfiltered__osm_inrix = filter_groups_by_match(merged_osm_inrix)
 
     # Plot the results
-    plot_matched_geometry(test_inrix[test_inrix['match'] == True], 'geometry_x', 'Matched Geometry with Map Tiles')
-    plot_matched_geometry(test_inrix, 'geometry_y', 'Inrix Geometry with Map Tiles')
+    plot_matched_geometry(filtered_osm_inrix ,'geometry_osm', 'Matched Geometry with Map Tiles')
+    plot_matched_geometry(merged_osm_inrix, 'geometry_inrix', 'Inrix Geometry with Map Tiles')
     plot_matched_geometry(edges, 'geometry', 'OSM Geometry with Map Tiles')
 
 if __name__ == "__main__":
