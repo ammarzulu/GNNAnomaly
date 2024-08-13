@@ -117,7 +117,9 @@ def plot_matched_geometry(df, geometry_column, title):
     gdf.plot(ax=ax, linewidth=0.5, edgecolor='blue')
     ctx.add_basemap(ax, source=ctx.providers.OpenStreetMap.Mapnik)
     plt.title(title)
-    plt.show()
+    plt.savefig('../plots/osm_mapping/'+title + '.png')
+    
+    # plt.show()
 
 def main():
 
@@ -154,6 +156,8 @@ def main():
 
     # Filter groups by match
     filtered_osm_inrix, unfiltered__osm_inrix = filter_groups_by_match(merged_osm_inrix)
+    
+    filtered_osm_inrix.to_csv('../data/MapData2023/maprelease-osmconflation/osm_inrix_mapping.csv', index=False)    
 
     # Plot the results
     plot_matched_geometry(filtered_osm_inrix ,'geometry_osm', 'Matched Geometry with Map Tiles')

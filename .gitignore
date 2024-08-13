@@ -17,3 +17,5 @@ src/cache/
 notebooks/test/
 
 src/cache/*.json
+
+data/processed_osm_mapping/*csv
